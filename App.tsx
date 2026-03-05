@@ -18,11 +18,13 @@ function App() {
   useEffect(() => {
     const loadData = async () => {
       try {
-        // Check OneDrive availability
-        const oneDriveResponse = await fetch('/api/check-onedrive');
-        if (oneDriveResponse.ok) {
-          const oneDriveStatus = await oneDriveResponse.json();
-          setOneDriveAvailable(oneDriveStatus.available);
+        // Check OneDrive availability (only for local development)
+        if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+          const oneDriveResponse = await fetch('/api/check-onedrive');
+          if (oneDriveResponse.ok) {
+            const oneDriveStatus = await oneDriveResponse.json();
+            setOneDriveAvailable(oneDriveStatus.available);
+          }
         }
 
         // 1. Load Draft State (Visual Inputs) from LocalStorage
@@ -49,10 +51,10 @@ function App() {
           });
         }
 
-        // 2. Load History Count from Server
-        const response = await fetch('/api/history');
-        if (response.ok) {
-          const history = await response.json();
+        // 2. Load History Count from LocalStorage (for static deployment)
+        const savedHistory = localStorage.getItem('ccm-log-history');
+        if (savedHistory) {
+          const history = JSON.parse(savedHistory);
           setHistoryCount(history.length);
         }
       } catch (error) {
@@ -140,6 +142,195 @@ function App() {
     }
   };
 
+  const generateAndSaveExcel = async (history: Record<string, string>[], isLocal: boolean) => {
+    // --- GENERATE EXCEL (Horizontal Layout) ---
+    const aoa: (string | number | null)[][] = [];
+    const merges: any[] = [];
+    
+    // Layout Calculation:
+    // Col 0: Parameter Labels
+    // Entry 1: Col 1 & 2
+    // Entry 2: Col 3 & 4
+    // ...
+    const numEntries = history.length;
+    const totalCols = 1 + (numEntries * 2);
+
+    // --- Titles ---
+    aoa.push(["WELSPUN CORP LTD (STEEL DIVISION)"]);
+    merges.push({ s: { r: 0, c: 0 }, e: { r: 0, c: totalCols - 1 } });
+    
+    aoa.push(["CCM LOG SHEET"]);
+    merges.push({ s: { r: 1, c: 0 }, e: { r: 1, c: totalCols - 1 } });
+    
+    aoa.push([]); // Spacer
+
+    // --- Header Rows for Columns ---
+    const rowHeader1 = ["PARAMETER"];
+    const rowHeader2 = [""]; // Empty cell under 'PARAMETER'
+
+    for (let i = 0; i < numEntries; i++) {
+        rowHeader1.push(`ENTRY #${i + 1}`, ""); 
+        // Merge "ENTRY #X" across its 2 columns
+        merges.push({ s: { r: 3, c: 1 + (i * 2) }, e: { r: 3, c: 2 + (i * 2) } });
+        
+        rowHeader2.push("STD 1 / VALUE", "STD 2");
+    }
+    aoa.push(rowHeader1); // Row Index 3
+    aoa.push(rowHeader2); // Row Index 4
+    
+    let currentRowIndex = 5;
+
+    // Helper to add a data row horizontally
+    // keyBase: the data-label used in components (without "(STD 1)")
+    const addRow = (label: string, keyBase: string, isSplit: boolean) => {
+        const row = [label];
+        for (let i = 0; i < numEntries; i++) {
+            const data = history[i];
+            if (isSplit) {
+                // If split, use both columns for distinct values
+                row.push(data[`${keyBase} (STD 1)`] || "");
+                row.push(data[`${keyBase} (STD 2)`] || "");
+            } else {
+                // If single value, put value in first col, merge with second
+                row.push(data[keyBase] || "");
+                row.push("");
+                merges.push({ s: { r: currentRowIndex, c: 1 + (i * 2) }, e: { r: currentRowIndex, c: 2 + (i * 2) } });
+            }
+        }
+        aoa.push(row);
+        currentRowIndex++;
+    };
+
+    // Helper for Section Headers
+    const addSection = (label: string) => {
+        const row = [label];
+        // Merge section header across all columns
+        merges.push({ s: { r: currentRowIndex, c: 0 }, e: { r: currentRowIndex, c: totalCols - 1 } });
+        aoa.push(row);
+        currentRowIndex++;
+    };
+
+    // --- BUILD ROWS ---
+
+    // Basic Info
+    addRow("DATE", "DATE", false);
+    addRow("SHIFT", "SHIFT", false);
+    addRow("HEAT NO", "HEAT NO", false);
+    addRow("CAST NO", "CAST NO", false);
+    addRow("SHIFT IN CHARGE", "SHIFT IN CHARGE", false);
+    
+    aoa.push([]); currentRowIndex++; // Spacer
+
+    // Process Parameters
+    addSection("--- PROCESS PARAMETERS ---");
+    // TUNDISH TROLLEY added here
+    addRow("TUNDISH TROLLEY", "TUNDISH TROLLEY", false);
+    addRow("TUNDISH NO", "TUNDISH NO", false);
+    addRow("TUNDISH BOARD", "TUNDISH BOARD", false);
+    addRow("TUNDISH LIFE", "TUNDISH LIFE", false);
+
+    const leftSplitItems = [
+      "TUNDISH NOZZLE DIA",
+      "TUNDISH OPENING", "MOULD JACKET NO", "SECTION", "MOULD TUBE NO",
+      "MOULD TUBE LIFE", "MOULD TUBE CLEANING LIFE", "CASTING START TIME",
+      "CASTING FINISH TIME", "TOTAL CASTING TIME", "AVG CASTING SPEED"
+    ];
+    leftSplitItems.forEach(item => addRow(item, item, true));
+    
+    addRow("RAPSEED OIL / CASTING POWDER", "RAPSEED OIL / CASTING POWDER", false);
+    addRow("RHOMBOIDITY", "RHOMBOIDITY", true);
+    addRow("PRIMARY MOULD WATER FLOW", "PRIMARY MOULD WATER", true); // Matches key: PRIMARY MOULD WATER (STD 1)
+
+    // Nested Sections
+    addSection("PRIMARY MOULD WATER PRESSURE");
+    addRow("   INLET", "PRIMARY MOULD WATER PRESSURE - INLET", true);
+    addRow("   OUTLET", "PRIMARY MOULD WATER PRESSURE - OUTLET", true);
+
+    addSection("PRIMARY WATER TEMP");
+    addRow("   INLET", "PRIMARY WATER TEMP - INLET", true);
+    addRow("   OUTLET", "PRIMARY WATER TEMP - OUTLET", true);
+
+    addSection("SECONDARY WATER (L/min)");
+    addRow("ZONE 1", "ZONE 1", true);
+    addRow("ZONE 2", "ZONE 2", true);
+    addRow("ZONE 3", "ZONE 3", true);
+
+    // Moved Remarks here to match visual layout
+    aoa.push([]); currentRowIndex++;
+    addRow("REMARKS", "REMARKS", false);
+    aoa.push([]); currentRowIndex++;
+
+    // Timings & Checks
+    addSection("--- TIMINGS & CHECKS ---");
+    const rightSingleItems = [
+      "TAPPING TIME",
+      "PURGING TIME",
+      "LIFTING TEMP",
+      "TUNDISH TEMP",
+      "LADLE NO",
+      "LADLE LIFE",
+      "LADLE OPENING",
+      "LADLE OPEN TIME",
+      "LADLE CLOSE TIME"
+    ];
+    rightSingleItems.forEach(item => addRow(item, item, false));
+
+    addRow("TOTAL NO OF BILLET", "TOTAL NO OF BILLET", true);
+    addRow("TOTAL WT", "TOTAL WT", false);
+    addRow("LADLE SHROUD LIFE", "LADLE SHROUD LIFE", false);
+    addRow("BILLET LENGTH", "BILLET LENGTH", true);
+
+    const rightSingleItems2 = [
+      "TOCB",
+      "CASTING COMPLETED AT",
+      "MACHINE READY AT"
+    ];
+    rightSingleItems2.forEach(item => addRow(item, item, false));
+    
+    aoa.push([]); currentRowIndex++;
+
+    // Personnel
+    addSection("--- PERSONNEL ---");
+    addRow("MOULD OPERATOR", "MOULD OPERATOR", true);
+    addRow("FITTER / SHIFT FITTER", "FITTER / SHIFT FITTER", false);
+    addRow("S B O", "S B O", false);
+    addRow("GAS CUTTER", "GAS CUTTER", true);
+    addRow("TEEMER MAN", "TEEMER MAN", false);
+
+
+    // 6. Create Sheet
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+
+    // Set Column Widths
+    const cols = [{ wch: 35 }]; // Label Column
+    for(let i=0; i<numEntries; i++) {
+        cols.push({ wch: 15 }, { wch: 15 });
+    }
+    ws['!cols'] = cols;
+
+    // Apply Merges
+    ws['!merges'] = merges;
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "CCM Log History");
+    
+    if (isLocal) {
+      // Local: Save to OneDrive and download
+      await saveToOneDrive(wb);
+      const dateStr = new Date().toISOString().slice(0, 10);
+      XLSX.writeFile(wb, `CCM_Log_Horizontal_${dateStr}.xlsx`);
+      
+      const oneDriveMsg = oneDriveAvailable ? "\n\nFile also saved to your OneDrive folder (CCM-LogSheet)." : "";
+      alert(`Entry #${history.length} saved successfully!${oneDriveMsg}\n\nThe data remains in the form.`);
+    } else {
+      // GitHub Pages: Just download
+      const dateStr = new Date().toISOString().slice(0, 10);
+      XLSX.writeFile(wb, `CCM_Log_Horizontal_${dateStr}.xlsx`);
+      
+      alert(`Entry #${history.length} saved successfully!\n\nExcel file downloaded. Data stored locally in browser.\n\nThe data remains in the form.`);
+    }
+  };
+
   const handleSave = async () => {
     try {
       // 1. Save current state to local storage (Draft)
@@ -148,201 +339,43 @@ function App() {
       // 2. Get Data Map for History
       const currentDataMap = getFormDataMap();
 
-      // 3. Save to Server
-      const saveResponse = await fetch('/api/history', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(currentDataMap)
-      });
+      // Check if we're running locally (with server) or on GitHub Pages
+      const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
 
-      if (!saveResponse.ok) throw new Error("Failed to save to server");
+      if (isLocal) {
+        // Local development: Save to server
+        const saveResponse = await fetch('/api/history', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(currentDataMap)
+        });
 
-      // 4. Get full history from server for Excel generation
-      const historyResponse = await fetch('/api/history');
-      if (!historyResponse.ok) throw new Error("Failed to fetch history");
-      const history: Record<string, string>[] = await historyResponse.json();
-      
-      setHistoryCount(history.length);
+        if (!saveResponse.ok) throw new Error("Failed to save to server");
 
-      // --- GENERATE EXCEL (Horizontal Layout) ---
-      const aoa: (string | number | null)[][] = [];
-      const merges: any[] = [];
-      
-      // Layout Calculation:
-      // Col 0: Parameter Labels
-      // Entry 1: Col 1 & 2
-      // Entry 2: Col 3 & 4
-      // ...
-      const numEntries = history.length;
-      const totalCols = 1 + (numEntries * 2);
+        // Get full history from server for Excel generation
+        const historyResponse = await fetch('/api/history');
+        if (!historyResponse.ok) throw new Error("Failed to fetch history");
+        const history: Record<string, string>[] = await historyResponse.json();
+        
+        setHistoryCount(history.length);
 
-      // --- Titles ---
-      aoa.push(["WELSPUN CORP LTD (STEEL DIVISION)"]);
-      merges.push({ s: { r: 0, c: 0 }, e: { r: 0, c: totalCols - 1 } });
-      
-      aoa.push(["CCM LOG SHEET"]);
-      merges.push({ s: { r: 1, c: 0 }, e: { r: 1, c: totalCols - 1 } });
-      
-      aoa.push([]); // Spacer
-
-      // --- Header Rows for Columns ---
-      const rowHeader1 = ["PARAMETER"];
-      const rowHeader2 = [""]; // Empty cell under 'PARAMETER'
-
-      for (let i = 0; i < numEntries; i++) {
-          rowHeader1.push(`ENTRY #${i + 1}`, ""); 
-          // Merge "ENTRY #X" across its 2 columns
-          merges.push({ s: { r: 3, c: 1 + (i * 2) }, e: { r: 3, c: 2 + (i * 2) } });
-          
-          rowHeader2.push("STD 1 / VALUE", "STD 2");
-      }
-      aoa.push(rowHeader1); // Row Index 3
-      aoa.push(rowHeader2); // Row Index 4
-      
-      let currentRowIndex = 5;
-
-      // Helper to add a data row horizontally
-      // keyBase: the data-label used in components (without "(STD 1)")
-      const addRow = (label: string, keyBase: string, isSplit: boolean) => {
-          const row = [label];
-          for (let i = 0; i < numEntries; i++) {
-              const data = history[i];
-              if (isSplit) {
-                  // If split, use both columns for distinct values
-                  row.push(data[`${keyBase} (STD 1)`] || "");
-                  row.push(data[`${keyBase} (STD 2)`] || "");
-              } else {
-                  // If single value, put value in first col, merge with second
-                  row.push(data[keyBase] || "");
-                  row.push("");
-                  merges.push({ s: { r: currentRowIndex, c: 1 + (i * 2) }, e: { r: currentRowIndex, c: 2 + (i * 2) } });
-              }
-          }
-          aoa.push(row);
-          currentRowIndex++;
-      };
-
-      // Helper for Section Headers
-      const addSection = (label: string) => {
-          const row = [label];
-          // Merge section header across all columns
-          merges.push({ s: { r: currentRowIndex, c: 0 }, e: { r: currentRowIndex, c: totalCols - 1 } });
-          aoa.push(row);
-          currentRowIndex++;
-      };
-
-      // --- BUILD ROWS ---
-
-      // Basic Info
-      addRow("DATE", "DATE", false);
-      addRow("SHIFT", "SHIFT", false);
-      addRow("HEAT NO", "HEAT NO", false);
-      addRow("CAST NO", "CAST NO", false);
-      addRow("SHIFT IN CHARGE", "SHIFT IN CHARGE", false);
-      
-      aoa.push([]); currentRowIndex++; // Spacer
-
-      // Process Parameters
-      addSection("--- PROCESS PARAMETERS ---");
-      // TUNDISH TROLLEY added here
-      addRow("TUNDISH TROLLEY", "TUNDISH TROLLEY", false);
-      addRow("TUNDISH NO", "TUNDISH NO", false);
-      addRow("TUNDISH BOARD", "TUNDISH BOARD", false);
-      addRow("TUNDISH LIFE", "TUNDISH LIFE", false);
-
-      const leftSplitItems = [
-        "TUNDISH NOZZLE DIA",
-        "TUNDISH OPENING", "MOULD JACKET NO", "SECTION", "MOULD TUBE NO",
-        "MOULD TUBE LIFE", "MOULD TUBE CLEANING LIFE", "CASTING START TIME",
-        "CASTING FINISH TIME", "TOTAL CASTING TIME", "AVG CASTING SPEED"
-      ];
-      leftSplitItems.forEach(item => addRow(item, item, true));
-      
-      addRow("RAPSEED OIL / CASTING POWDER", "RAPSEED OIL / CASTING POWDER", false);
-      addRow("RHOMBOIDITY", "RHOMBOIDITY", true);
-      addRow("PRIMARY MOULD WATER FLOW", "PRIMARY MOULD WATER", true); // Matches key: PRIMARY MOULD WATER (STD 1)
-
-      // Nested Sections
-      addSection("PRIMARY MOULD WATER PRESSURE");
-      addRow("   INLET", "PRIMARY MOULD WATER PRESSURE - INLET", true);
-      addRow("   OUTLET", "PRIMARY MOULD WATER PRESSURE - OUTLET", true);
-
-      addSection("PRIMARY WATER TEMP");
-      addRow("   INLET", "PRIMARY WATER TEMP - INLET", true);
-      addRow("   OUTLET", "PRIMARY WATER TEMP - OUTLET", true);
-
-      addSection("SECONDARY WATER (L/min)");
-      addRow("ZONE 1", "ZONE 1", true);
-      addRow("ZONE 2", "ZONE 2", true);
-      addRow("ZONE 3", "ZONE 3", true);
-
-      // Moved Remarks here to match visual layout
-      aoa.push([]); currentRowIndex++;
-      addRow("REMARKS", "REMARKS", false);
-      aoa.push([]); currentRowIndex++;
-
-      // Timings & Checks
-      addSection("--- TIMINGS & CHECKS ---");
-      const rightSingleItems = [
-        "TAPPING TIME",
-        "PURGING TIME",
-        "LIFTING TEMP",
-        "TUNDISH TEMP",
-        "LADLE NO",
-        "LADLE LIFE",
-        "LADLE OPENING",
-        "LADLE OPEN TIME",
-        "LADLE CLOSE TIME"
-      ];
-      rightSingleItems.forEach(item => addRow(item, item, false));
-
-      addRow("TOTAL NO OF BILLET", "TOTAL NO OF BILLET", true);
-      addRow("TOTAL WT", "TOTAL WT", false);
-      addRow("LADLE SHROUD LIFE", "LADLE SHROUD LIFE", false);
-      addRow("BILLET LENGTH", "BILLET LENGTH", true);
-
-      const rightSingleItems2 = [
-        "TOCB",
-        "CASTING COMPLETED AT",
-        "MACHINE READY AT"
-      ];
-      rightSingleItems2.forEach(item => addRow(item, item, false));
-      
-      aoa.push([]); currentRowIndex++;
-
-      // Personnel
-      addSection("--- PERSONNEL ---");
-      addRow("MOULD OPERATOR", "MOULD OPERATOR", true);
-      addRow("FITTER / SHIFT FITTER", "FITTER / SHIFT FITTER", false);
-      addRow("S B O", "S B O", false);
-      addRow("GAS CUTTER", "GAS CUTTER", true);
-      addRow("TEEMER MAN", "TEEMER MAN", false);
-
-
-      // 6. Create Sheet
-      const ws = XLSX.utils.aoa_to_sheet(aoa);
-
-      // Set Column Widths
-      const cols = [{ wch: 35 }]; // Label Column
-      for(let i=0; i<numEntries; i++) {
-          cols.push({ wch: 15 }, { wch: 15 });
-      }
-      ws['!cols'] = cols;
-
-      // Apply Merges
-      ws['!merges'] = merges;
-
-      const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, "CCM Log History");
-      
-      // 7. Save to OneDrive automatically
-      const savedToOneDrive = await saveToOneDrive(wb);
-      
-      // Feedback to user
-      if (savedToOneDrive) {
-        alert(`Entry #${history.length} saved successfully!\n\nFile saved to your OneDrive folder (OneDrive > CCM-LogSheet).\n\nThe data remains in the form.`);
+        // Generate Excel and save to OneDrive
+        await generateAndSaveExcel(history, true);
       } else {
-        alert(`Entry #${history.length} saved successfully!\n\nNote: File could not be saved to OneDrive. Please ensure OneDrive is running.\n\nThe data remains in the form.`);
+        // GitHub Pages: Save to localStorage
+        const savedHistory = localStorage.getItem('ccm-log-history');
+        let history: Record<string, string>[] = [];
+        
+        if (savedHistory) {
+          history = JSON.parse(savedHistory);
+        }
+        
+        history.push(currentDataMap);
+        localStorage.setItem('ccm-log-history', JSON.stringify(history));
+        setHistoryCount(history.length);
+
+        // Generate Excel for download
+        await generateAndSaveExcel(history, false);
       }
       
     } catch (error) {
@@ -369,18 +402,30 @@ function App() {
   };
 
   const handleResetHistory = async () => {
-      if (confirm("Are you sure? This will delete the central history file on the server. This cannot be undone.")) {
-          try {
-              const response = await fetch('/api/history', { method: 'DELETE' });
-              if (response.ok) {
-                  setHistoryCount(0);
-                  alert("Server history cleared. Next save will be Entry #1.");
-              } else {
-                  alert("Failed to clear server history.");
+      const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+      
+      if (isLocal) {
+          // Local: Clear server history
+          if (confirm("Are you sure? This will delete the central history file on the server. This cannot be undone.")) {
+              try {
+                  const response = await fetch('/api/history', { method: 'DELETE' });
+                  if (response.ok) {
+                      setHistoryCount(0);
+                      alert("Server history cleared. Next save will be Entry #1.");
+                  } else {
+                      alert("Failed to clear server history.");
+                  }
+              } catch (error) {
+                  console.error("Error clearing history:", error);
+                  alert("Error connecting to server.");
               }
-          } catch (error) {
-              console.error("Error clearing history:", error);
-              alert("Error connecting to server.");
+          }
+      } else {
+          // GitHub Pages: Clear localStorage history
+          if (confirm("Are you sure? This will delete all saved entries from your browser. This cannot be undone.")) {
+              localStorage.removeItem('ccm-log-history');
+              setHistoryCount(0);
+              alert("Browser history cleared. Next save will be Entry #1.");
           }
       }
   };

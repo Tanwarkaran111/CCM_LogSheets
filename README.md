@@ -13,7 +13,7 @@ A modern web application for managing CCM (Continuous Casting Machine) log sheet
 
 ## Live Demo
 
-🚀 **View Live App**: [https://ccm-log-sheets.vercel.app](https://ccm-log-sheets.vercel.app)
+🚀 **View Live App**: [https://tanwarkaran111.github.io/CCM_LogSheets](https://tanwarkaran111.github.io/CCM_LogSheets)
 
 ## Run Locally
 
@@ -46,33 +46,37 @@ A modern web application for managing CCM (Continuous Casting Machine) log sheet
 ## Deployment
 
 ### Automatic Deployment (Recommended)
-The app is automatically deployed to Vercel when you push to the main branch.
+The app is automatically deployed to GitHub Pages when you push to the main branch.
 
-### Manual Deployment to Vercel
+### Manual Deployment to GitHub Pages
 
-1. **Install Vercel CLI:**
-   ```bash
-   npm i -g vercel
-   ```
+1. **Go to Repository Settings:**
+   - Go to your GitHub repository
+   - Click on "Settings" tab
+   - Scroll down to "Pages" section
 
-2. **Deploy:**
-   ```bash
-   vercel --prod
-   ```
+2. **Configure GitHub Pages:**
+   - Under "Source", select "GitHub Actions"
+   - The workflow will automatically deploy your app
+
+3. **Access Your Live App:**
+   - Your app will be available at: `https://tanwarkaran111.github.io/CCM_LogSheets`
 
 ### Manual Deployment to Other Platforms
 
-The app can be deployed to any platform that supports Node.js:
-- **Netlify**: Use `npm run build` and deploy the `dist` folder
-- **Heroku**: Use the included `vercel.json` as reference
-- **Railway**: Connect your GitHub repo for automatic deployment
+The app can be deployed to any static hosting service:
+- **Netlify**: Drag and drop the `dist` folder after running `npm run build`
+- **Vercel**: Use `vercel --prod` after installing Vercel CLI
+- **Firebase**: Use Firebase Hosting
 
 ## How It Works
 
 1. **Data Entry**: Fill out the CCM log form with casting parameters
 2. **Auto-Save**: Click "Save" to append entry to history
-3. **File Generation**: Excel file is automatically created with all entries
-4. **OneDrive Sync**: Files are saved to `OneDrive > CCM-LogSheet` folder
+3. **File Generation**: Excel file is automatically downloaded with all entries
+4. **Data Storage**: 
+   - **Local Development**: Files saved to `OneDrive > CCM-LogSheet` folder
+   - **Live App**: Data stored in browser's localStorage
 5. **Data Persistence**: Form data remains filled for quick successive entries
 
 ## Project Structure
