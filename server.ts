@@ -4,8 +4,27 @@ import fs from "fs";
 import path from "path";
 import cors from "cors";
 import bodyParser from "body-parser";
+import os from "os";
 
 const DATA_FILE = path.join(process.cwd(), "history.json");
+
+// Get OneDrive path
+const getOneDrivePath = (): string | null => {
+  const homeDir = os.homedir();
+  const oneDrivePath = path.join(homeDir, "OneDrive");
+  
+  if (fs.existsSync(oneDrivePath)) {
+    return oneDrivePath;
+  }
+  
+  // Try alternative OneDrive path (Business accounts)
+  const oneDriveBusinessPath = path.join(homeDir, "OneDrive - Business");
+  if (fs.existsSync(oneDriveBusinessPath)) {
+    return oneDriveBusinessPath;
+  }
+  
+  return null;
+};
 
 // Ensure data file exists
 if (!fs.existsSync(DATA_FILE)) {
@@ -49,6 +68,68 @@ async function startServer() {
       res.json({ success: true });
     } catch (error) {
       res.status(500).json({ error: "Failed to clear history" });
+    }
+  });
+
+  // Save Excel file to OneDrive
+  app.post("/api/save-to-onedrive", (req, res) => {
+    try {
+      const { fileName, fileData } = req.body;
+      const oneDrivePath = getOneDrivePath();
+
+      if (!oneDrivePath) {
+        return res.status(400).json({ 
+          error: "OneDrive folder not found. Please ensure OneDrive is installed and syncing.",
+          success: false 
+        });
+      }
+
+      // Create app folder in OneDrive if it doesn't exist
+      const appFolderPath = path.join(oneDrivePath, "CCM-LogSheet");
+      if (!fs.existsSync(appFolderPath)) {
+        fs.mkdirSync(appFolderPath, { recursive: true });
+      }
+
+      // Write file
+      const filePath = path.join(appFolderPath, fileName);
+      const buffer = Buffer.from(fileData, 'base64');
+      fs.writeFileSync(filePath, buffer);
+
+      res.json({ 
+        success: true, 
+        path: filePath,
+        message: `File saved to OneDrive: ${appFolderPath}`
+      });
+    } catch (error) {
+      console.error("Error saving to OneDrive:", error);
+      res.status(500).json({ 
+        error: "Failed to save to OneDrive",
+        details: (error as Error).message,
+        success: false 
+      });
+    }
+  });
+
+  // Check OneDrive availability
+  app.get("/api/check-onedrive", (req, res) => {
+    try {
+      const oneDrivePath = getOneDrivePath();
+      if (oneDrivePath) {
+        res.json({ 
+          available: true, 
+          path: oneDrivePath 
+        });
+      } else {
+        res.json({ 
+          available: false, 
+          message: "OneDrive folder not found" 
+        });
+      }
+    } catch (error) {
+      res.status(500).json({ 
+        error: "Failed to check OneDrive",
+        available: false 
+      });
     }
   });
 

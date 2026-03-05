@@ -7,18 +7,24 @@ import { Footer } from './components/Footer';
 
 function App() {
   const [historyCount, setHistoryCount] = useState(0);
-  const [directoryHandle, setDirectoryHandle] = useState<FileSystemDirectoryHandle | null>(null);
-  const [isFolderConnected, setIsFolderConnected] = useState(false);
   const [isInIframe, setIsInIframe] = useState(false);
+  const [oneDriveAvailable, setOneDriveAvailable] = useState(false);
 
   useEffect(() => {
     setIsInIframe(window.self !== window.top);
   }, []);
 
-  // Load saved data (current draft) on component mount
+  // Load saved data and check OneDrive availability
   useEffect(() => {
     const loadData = async () => {
       try {
+        // Check OneDrive availability
+        const oneDriveResponse = await fetch('/api/check-onedrive');
+        if (oneDriveResponse.ok) {
+          const oneDriveStatus = await oneDriveResponse.json();
+          setOneDriveAvailable(oneDriveStatus.available);
+        }
+
         // 1. Load Draft State (Visual Inputs) from LocalStorage
         const savedData = localStorage.getItem('ccm-log-data');
         if (savedData) {
@@ -94,41 +100,43 @@ function App() {
      localStorage.setItem('ccm-log-data', JSON.stringify(valuesForStorage));
   };
 
-  const handleConnectFolder = async () => {
-    try {
-      // @ts-ignore - File System Access API
-      const handle = await window.showDirectoryPicker();
-      setDirectoryHandle(handle);
-      setIsFolderConnected(true);
-      alert("Folder connected successfully! Files will now be saved directly to this folder.");
-    } catch (error) {
-      console.error("Folder selection failed:", error);
-      if ((error as Error).name === 'SecurityError' || (error as Error).message.includes('sub frames')) {
-        alert("SECURITY RESTRICTION: Direct folder access is blocked inside this preview window.\n\nPlease click the 'Open in New Tab' button at the bottom to use this feature.");
-      } else if ((error as Error).name !== 'AbortError') {
-        alert("Your browser might not support direct folder access, or permission was denied.");
-      }
+  const saveToOneDrive = async (workbook: XLSX.WorkBook) => {
+    if (!oneDriveAvailable) {
+      console.warn("OneDrive not available, skipping OneDrive save");
+      return;
     }
-  };
-
-  const writeToLocalFolder = async (workbook: XLSX.WorkBook) => {
-    if (!directoryHandle) return;
 
     try {
       const dateStr = new Date().toISOString().slice(0, 10);
       const fileName = `CCM_Master_Log_${dateStr}.xlsx`;
       
-      // Create or get the file in the selected directory
-      const fileHandle = await directoryHandle.getFileHandle(fileName, { create: true });
-      // @ts-ignore
-      const writable = await fileHandle.createWritable();
-      
       const excelBuffer = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' });
-      await writable.write(excelBuffer);
-      await writable.close();
-      console.log("File written to local folder:", fileName);
+      
+      // Convert Uint8Array to base64
+      const uint8Array = new Uint8Array(excelBuffer);
+      let binaryString = '';
+      for (let i = 0; i < uint8Array.length; i++) {
+        binaryString += String.fromCharCode(uint8Array[i]);
+      }
+      const base64Data = btoa(binaryString);
+      
+      const response = await fetch('/api/save-to-onedrive', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fileName, fileData: base64Data })
+      });
+
+      const result = await response.json();
+      if (result.success) {
+        console.log("File saved to OneDrive:", result.path);
+        return true;
+      } else {
+        console.error("Failed to save to OneDrive:", result.error);
+        return false;
+      }
     } catch (error) {
-      console.error("Failed to write to local folder:", error);
+      console.error("Error saving to OneDrive:", error);
+      return false;
     }
   };
 
@@ -327,18 +335,15 @@ function App() {
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, "CCM Log History");
       
-      // 7. Write to Local Folder if connected
-      if (directoryHandle) {
-        await writeToLocalFolder(wb);
-      }
-
-      // 8. Generate browser download as fallback/primary
-      const dateStr = new Date().toISOString().slice(0, 10);
-      XLSX.writeFile(wb, `CCM_Log_Horizontal_${dateStr}.xlsx`);
+      // 7. Save to OneDrive automatically
+      const savedToOneDrive = await saveToOneDrive(wb);
       
       // Feedback to user
-      const folderMsg = directoryHandle ? "\n\nFile also updated in your connected folder." : "";
-      alert(`Entry #${history.length} saved successfully!${folderMsg}\n\nThe data remains in the form.`);
+      if (savedToOneDrive) {
+        alert(`Entry #${history.length} saved successfully!\n\nFile saved to your OneDrive folder (OneDrive > CCM-LogSheet).\n\nThe data remains in the form.`);
+      } else {
+        alert(`Entry #${history.length} saved successfully!\n\nNote: File could not be saved to OneDrive. Please ensure OneDrive is running.\n\nThe data remains in the form.`);
+      }
       
     } catch (error) {
       console.error("Error saving data:", error);
@@ -417,38 +422,31 @@ function App() {
             </div>
         )}
 
+        {/* OneDrive Status Badge */}
+        {oneDriveAvailable && (
+            <div className="bg-blue-600 text-white text-xs px-3 py-1 rounded-full shadow-md mb-2 flex items-center gap-1">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" fill="currentColor" viewBox="0 0 24 24">
+                  <path d="M19.35 10.04C18.67 6.59 15.64 4 12 4c-1.48 0-2.85.43-4.01 1.17l1.46 1.46C10.21 5.23 11.08 5 12 5c3.04 0 5.5 2.46 5.5 5.5v.5H19c2.05 0 3.71 1.66 3.71 3.71 0 1.71-1.04 2.63-2.36 2.36z"/>
+                </svg>
+                OneDrive ready
+            </div>
+        )}
+
         {/* Open in New Tab Button (Gray) - Only shows in iframe */}
         {isInIframe && (
           <button 
             onClick={() => window.open(window.location.href, '_blank')}
             className="bg-gray-700 text-white p-3 rounded-full shadow-lg hover:bg-gray-800 transition-colors flex items-center justify-center group relative"
-            title="Open in New Tab for Folder Access"
+            title="Open in New Tab"
           >
             <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
             </svg>
             <span className="absolute right-full mr-2 bg-gray-800 text-white text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
-               Open in New Tab (Required for Folder)
+               Open in New Tab
             </span>
           </button>
         )}
-
-        {/* Connect Folder Button (Yellow/Amber) */}
-        <button 
-          onClick={handleConnectFolder}
-          className={`${isFolderConnected ? 'bg-amber-600' : 'bg-amber-400'} text-white p-3 rounded-full shadow-lg hover:bg-amber-500 transition-colors flex items-center justify-center group relative`}
-          title="Connect to Local Folder"
-        >
-          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
-          </svg>
-          {isFolderConnected && (
-            <div className="absolute -top-1 -right-1 bg-green-500 w-3 h-3 rounded-full border-2 border-white"></div>
-          )}
-          <span className="absolute right-full mr-2 bg-gray-800 text-white text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
-             {isFolderConnected ? 'Folder Connected' : 'Connect Local Folder'}
-          </span>
-        </button>
 
         {/* Download Master Excel Button (Indigo) */}
         {historyCount > 0 && (
