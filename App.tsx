@@ -327,7 +327,7 @@ function App() {
       const dateStr = new Date().toISOString().slice(0, 10);
       XLSX.writeFile(wb, `CCM_Log_Horizontal_${dateStr}.xlsx`);
       
-      alert(`Entry #${history.length} saved successfully!\n\nExcel file downloaded. Data stored locally in browser.\n\nThe data remains in the form.`);
+      alert(`Entry #${history.length} saved successfully!\n\nExcel file downloaded. Data stored locally in browser.\n\nNote: OneDrive saving is only available in Local Mode.\n\nThe data remains in the form.`);
     }
   };
 
@@ -339,10 +339,11 @@ function App() {
       // 2. Get Data Map for History
       const currentDataMap = getFormDataMap();
 
-      // Check if we're running locally (with server) or on GitHub Pages
-      const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+      // Check if we're running locally with server (npm run dev) or on GitHub Pages
+      const isLocalWithServer = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+      const isGitHubPages = window.location.hostname.includes('github.io');
 
-      if (isLocal) {
+      if (isLocalWithServer) {
         // Local development: Save to server
         const saveResponse = await fetch('/api/history', {
           method: 'POST',
@@ -402,9 +403,9 @@ function App() {
   };
 
   const handleResetHistory = async () => {
-      const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+      const isLocalWithServer = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
       
-      if (isLocal) {
+      if (isLocalWithServer) {
           // Local: Clear server history
           if (confirm("Are you sure? This will delete the central history file on the server. This cannot be undone.")) {
               try {
@@ -467,6 +468,18 @@ function App() {
             </div>
         )}
 
+        {/* Environment Status Badge */}
+        <div className={`text-white text-xs px-3 py-1 rounded-full shadow-md mb-2 flex items-center gap-1 ${
+          window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.0.1' 
+            ? 'bg-green-600' 
+            : 'bg-purple-600'
+        }`}>
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" fill="currentColor" viewBox="0 0 24 24">
+              <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
+            </svg>
+            {window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' ? 'Local Mode' : 'Web Mode'}
+        </div>
+
         {/* OneDrive Status Badge */}
         {oneDriveAvailable && (
             <div className="bg-blue-600 text-white text-xs px-3 py-1 rounded-full shadow-md mb-2 flex items-center gap-1">
@@ -497,18 +510,23 @@ function App() {
         {historyCount > 0 && (
           <button 
             onClick={async () => {
-              try {
-                const response = await fetch('/api/history');
-                const history = await response.json();
-                // We'll reuse the logic from handleSave but without saving a new entry
-                // I'll extract the excel generation logic to a helper function in a real app, 
-                // but for now I'll just trigger a "dummy" save or copy the logic.
-                // Actually, let's just trigger the handleSave logic with a flag or similar.
-                // For simplicity in this edit, I'll just add the button and let the user know 
-                // that Save also downloads the latest master.
-                alert("The 'Save' button already downloads the complete master file with all entries. \n\nTotal entries currently in master: " + history.length);
-              } catch (e) {
-                console.error(e);
+              const isLocalWithServer = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+              
+              if (isLocalWithServer) {
+                try {
+                  const response = await fetch('/api/history');
+                  const history = await response.json();
+                  alert("The 'Save' button already downloads the complete master file with all entries. \n\nTotal entries currently in master: " + history.length);
+                } catch (e) {
+                  console.error(e);
+                }
+              } else {
+                // GitHub Pages: Show info from localStorage
+                const savedHistory = localStorage.getItem('ccm-log-history');
+                if (savedHistory) {
+                  const history = JSON.parse(savedHistory);
+                  alert("The 'Save' button already downloads the complete master file with all entries. \n\nTotal entries currently in master: " + history.length);
+                }
               }
             }}
             className="bg-indigo-600 text-white p-3 rounded-full shadow-lg hover:bg-indigo-700 transition-colors flex items-center justify-center group relative"
@@ -527,7 +545,11 @@ function App() {
         <button 
           onClick={handleSave}
           className="bg-green-600 text-white p-4 rounded-full shadow-lg hover:bg-green-700 transition-colors flex items-center justify-center group relative"
-          title="Save & Append to Excel"
+          title={
+            window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+              ? "Save & Append to Excel (downloads file + saves to OneDrive)"
+              : "Save & Download Excel (data stored in browser)"
+          }
         >
           <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
