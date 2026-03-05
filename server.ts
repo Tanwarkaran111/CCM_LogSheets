@@ -78,9 +78,9 @@ async function startServer() {
       const oneDrivePath = getOneDrivePath();
 
       if (!oneDrivePath) {
-        return res.status(400).json({ 
-          error: "OneDrive folder not found. Please ensure OneDrive is installed and syncing.",
-          success: false 
+        return res.status(400).json({
+          error: "OneDrive not available in this environment. Files are only saved locally when running the app.",
+          success: false
         });
       }
 
@@ -95,17 +95,17 @@ async function startServer() {
       const buffer = Buffer.from(fileData, 'base64');
       fs.writeFileSync(filePath, buffer);
 
-      res.json({ 
-        success: true, 
+      res.json({
+        success: true,
         path: filePath,
         message: `File saved to OneDrive: ${appFolderPath}`
       });
     } catch (error) {
       console.error("Error saving to OneDrive:", error);
-      res.status(500).json({ 
+      res.status(500).json({
         error: "Failed to save to OneDrive",
         details: (error as Error).message,
-        success: false 
+        success: false
       });
     }
   });
